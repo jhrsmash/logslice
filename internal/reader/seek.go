@@ -1,90 +1,85 @@
 package reader
 
 import (
-	"bufio"
 	"io"
 	"time"
 
 	"github.com/example/logslice/internal/parser"
 )
 
-// SeekToTime performs a binary search over the log file to find the byte
-// offset of the first line whose timestamp is >= target. It returns 0 if
-// the file is empty or every line precedes target.
-func SeekToTime(rs io.ReadSeeker, size int64, target time.Time) (int64, error) {
+// SeekToTime performs a binary search over the file to find the offset of the
+// first log line whose timestamp is >= target. Returns the byte offset, or
+// io.EOF if no such line exists.
+func SeekToTime(r *Reader, target time.Time) (int64, error) {
+	size := r.Size()
 	if size == 0 {
-		return 0, nil
+		return 0, io.EOF
 	}
 
 	lo, hi := int64(0), size
 
 	for lo < hi {
 		mid := (lo + hi) / 2
-
-		t, err := timestampAtOffset(rs, mid)
+		offset, err := snapToLineStart(r, mid)
 		if err != nil {
-			// Could not parse a timestamp at this offset; move forward.
-			lo = mid + 1
+			return 0, err
+		}
+
+		t, err := timestampAtOffset(r, offset)
+		if err != nil {
+			// No valid line found in upper half; shrink
+			hi = mid
 			continue
 		}
 
 		if t.Before(target) {
-			lo = mid + 1
+			lo = offset + 1
 		} else {
-			hi = mid
+			hi = offset
 		}
 	}
 
-	// Snap lo back to the start of the line that contains byte lo.
-	return snapToLineStart(rs, lo)
+	if lo >= size {
+		return 0, io.EOF
+	}
+
+	// Snap lo to a clean line boundary
+	offset, err := snapToLineStart(r, lo)
+	if err != nil {
+		return 0, err
+	}
+	return offset, nil
 }
 
-// timestampAtOffset seeks to offset, skips to the next newline (to avoid
-// landing mid-line), then parses the timestamp of the following line.
-func timestampAtOffset(rs io.ReadSeeker, offset int64) (time.Time, error) {
-	if _, err := rs.Seek(offset, io.SeekStart); err != nil {
-		return time.Time{}, err
-	}
-
-	scanner := bufio.NewScanner(rs)
-
-	// If offset > 0, the first scan advances past the partial line we landed on.
-	if offset > 0 {
-		if !scanner.Scan() {
-			return time.Time{}, io.EOF
-		}
-	}
-
-	if !scanner.Scan() {
-		return time.Time{}, io.EOF
-	}
-
-	p := parser.New()
-	line, err := p.Parse(scanner.Text())
+// timestampAtOffset reads the log line starting at offset and parses its timestamp.
+func timestampAtOffset(r *Reader, offset int64) (time.Time, error) {
+	line, err := r.ReadLineAt(offset)
 	if err != nil {
 		return time.Time{}, err
 	}
-	return line.Timestamp, nil
+	p := parser.New()
+	parsed, err := p.Parse(line)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return parsed.Timestamp, nil
 }
 
-// snapToLineStart moves backward from offset until a newline (or BOF) is
-// found, returning the offset of the first byte of that line.
-func snapToLineStart(rs io.ReadSeeker, offset int64) (int64, error) {
-	if offset == 0 {
+// snapToLineStart scans backwards from offset to find the start of the
+// enclosing line. If offset is already at position 0 it is returned as-is.
+func snapToLineStart(r *Reader, offset int64) (int64, error) {
+	if offset <= 0 {
 		return 0, nil
 	}
 
-	// Walk backward one byte at a time to find the preceding newline.
+	// Walk backwards until we find a newline or the beginning of the file.
 	for offset > 0 {
 		offset--
-		if _, err := rs.Seek(offset, io.SeekStart); err != nil {
+		b, err := r.ReadByteAt(offset)
+		if err != nil {
 			return 0, err
 		}
-		buf := make([]byte, 1)
-		if _, err := rs.Read(buf); err != nil {
-			return 0, err
-		}
-		if buf[0] == '\n' {
+		if b == '\n' {
 			return offset + 1, nil
 		}
 	}
