@@ -1,61 +1,62 @@
-package reader_test
+package reader
 
 import (
+	"os"
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/user/logslice/internal/parser"
-	"github.com/user/logslice/internal/reader"
 )
 
-func makeLogFile(t *testing.T, entries []string) string {
+func makeLogFile(t *testing.T, lines []string) *os.File {
 	t.Helper()
-	return writeTempFile(t, strings.Join(entries, "\n")+"\n")
+	f, err := os.CreateTemp("", "logslice-seek-*.log")
+	if err != nil {
+		t.Fatalf("create temp file: %v", err)
+	}
+	t.Cleanup(func() { os.Remove(f.Name()) })
+
+	if _, err := f.WriteString(strings.Join(lines, "\n") + "\n"); err != nil {
+		t.Fatalf("write temp file: %v", err)
+	}
+	if _, err := f.Seek(0, 0); err != nil {
+		t.Fatalf("seek temp file: %v", err)
+	}
+	return f
 }
 
 func TestSeekToTime_BeginningOfFile(t *testing.T) {
-	entries := []string{
-		"2024-03-01T10:00:00Z INFO  first",
-		"2024-03-01T10:00:01Z INFO  second",
-		"2024-03-01T10:00:02Z INFO  third",
+	lines := []string{
+		"2024-01-01T10:00:00Z INFO  first message",
+		"2024-01-01T10:01:00Z INFO  second message",
+		"2024-01-01T10:02:00Z WARN  third message",
 	}
-	path := makeLogFile(t, entries)
+	f := makeLogFile(t, lines)
+	defer f.Close()
 
-	r, err := reader.New(path)
+	info, _ := f.Stat()
+	target := time.Date(2024, 1, 1, 9, 59, 0, 0, time.UTC)
+
+	offset, err := SeekToTime(f, info.Size(), target)
 	if err != nil {
-		t.Fatalf("New: %v", err)
+		t.Fatalf("SeekToTime error: %v", err)
 	}
-	defer r.Close()
-
-	p := parser.New()
-	target := time.Date(2024, 3, 1, 9, 59, 0, 0, time.UTC)
-
-	offset, err := reader.SeekToTime(r, p, target)
-	if err != nil {
-		t.Fatalf("SeekToTime: %v", err)
-	}
-	// Target is before all entries — should return offset 0
 	if offset != 0 {
-		t.Errorf("expected offset 0, got %d", offset)
+		t.Errorf("expected offset 0 for target before all lines, got %d", offset)
 	}
 }
 
 func TestSeekToTime_EmptyFile(t *testing.T) {
-	path := writeTempFile(t, "")
-
-	r, err := reader.New(path)
+	f, err := os.CreateTemp("", "logslice-empty-*.log")
 	if err != nil {
-		t.Fatalf("New: %v", err)
+		t.Fatalf("create temp file: %v", err)
 	}
-	defer r.Close()
+	defer os.Remove(f.Name())
+	defer f.Close()
 
-	p := parser.New()
 	target := time.Now()
-
-	offset, err := reader.SeekToTime(r, p, target)
+	offset, err := SeekToTime(f, 0, target)
 	if err != nil {
-		t.Fatalf("SeekToTime: %v", err)
+		t.Fatalf("SeekToTime error on empty file: %v", err)
 	}
 	if offset != 0 {
 		t.Errorf("expected offset 0 for empty file, got %d", offset)
