@@ -44,3 +44,15 @@ func (f *Filter) Match(line *parser.LogLine) bool {
 
 	return true
 }
+
+// MatchAll returns only the log lines from the provided slice that satisfy
+// the filter criteria. It returns an empty (non-nil) slice if none match.
+func (f *Filter) MatchAll(lines []*parser.LogLine) []*parser.LogLine {
+	result := make([]*parser.LogLine, 0, len(lines))
+	for _, line := range lines {
+		if f.Match(line) {
+			result = append(result, line)
+		}
+	}
+	return result
+}
