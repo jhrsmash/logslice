@@ -91,3 +91,34 @@ func TestSeekToTime_MidFile(t *testing.T) {
 		t.Errorf("expected timestamp %v, got %v", target, line.Timestamp)
 	}
 }
+
+func TestSeekToTime_AfterLastEntry(t *testing.T) {
+	lines := []string{
+		"2024-01-01T10:00:00Z INFO  startup complete",
+		"2024-01-01T10:01:00Z DEBUG checking config",
+		"2024-01-01T10:02:00Z WARN  disk usage high",
+	}
+
+	f := makeLogFile(t, lines)
+	stat, _ := f.Stat()
+	p := parser.New()
+
+	// Target is after all log entries; expect the last entry to be returned.
+	target := time.Date(2024, 1, 1, 11, 0, 0, 0, time.UTC)
+	offset, err := SeekToTime(f, stat.Size(), target, p)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if _, err := f.Seek(offset, 0); err != nil {
+		t.Fatalf("seek: %v", err)
+	}
+	line, err := p.Parse(f)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	lastEntryTime := time.Date(2024, 1, 1, 10, 2, 0, 0, time.UTC)
+	if !line.Timestamp.Equal(lastEntryTime) {
+		t.Errorf("expected last entry timestamp %v, got %v", lastEntryTime, line.Timestamp)
+	}
+}
