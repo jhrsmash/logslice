@@ -5,43 +5,45 @@ import (
 	"os"
 	"testing"
 	"time"
+
+	"github.com/example/logslice/internal/parser"
 )
 
-// makeLogFile writes a temp log file with lines spaced one minute apart
-// starting from baseTime.
-func makeLogFile(t *testing.T, baseTime time.Time, count int) string {
+func makeLogFile(t *testing.T, lines []string) *os.File {
 	t.Helper()
 	f, err := os.CreateTemp("", "seek_test_*.log")
 	if err != nil {
 		t.Fatalf("create temp file: %v", err)
 	}
-	defer f.Close()
-
-	for i := 0; i < count; i++ {
-		ts := baseTime.Add(time.Duration(i) * time.Minute)
-		line := fmt.Sprintf("%s INFO  message number %d\n", ts.Format(time.RFC3339), i)
-		if _, err := f.WriteString(line); err != nil {
-			t.Fatalf("write line: %v", err)
-		}
+	t.Cleanup(func() {
+		f.Close()
+		os.Remove(f.Name())
+	})
+	for _, l := range lines {
+		fmt.Fprintln(f, l)
 	}
-	t.Cleanup(func() { os.Remove(f.Name()) })
-	return f.Name()
+	if _, err := f.Seek(0, 0); err != nil {
+		t.Fatalf("seek: %v", err)
+	}
+	return f
 }
 
 func TestSeekToTime_BeginningOfFile(t *testing.T) {
-	base := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
-	path := makeLogFile(t, base, 10)
-
-	r, err := New(path)
-	if err != nil {
-		t.Fatalf("New: %v", err)
+	lines := []string{
+		"2024-01-01T10:00:00Z INFO  startup complete",
+		"2024-01-01T10:01:00Z DEBUG checking config",
+		"2024-01-01T10:02:00Z WARN  disk usage high",
+		"2024-01-01T10:03:00Z ERROR disk full",
 	}
-	defer r.Close()
 
-	// Seek to a time before all entries — should land at offset 0.
-	offset, err := SeekToTime(r, base.Add(-time.Hour))
+	f := makeLogFile(t, lines)
+	stat, _ := f.Stat()
+	p := parser.New()
+
+	target := time.Date(2024, 1, 1, 10, 0, 0, 0, time.UTC)
+	offset, err := SeekToTime(f, stat.Size(), target, p)
 	if err != nil {
-		t.Fatalf("SeekToTime: %v", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	if offset != 0 {
 		t.Errorf("expected offset 0, got %d", offset)
@@ -49,21 +51,43 @@ func TestSeekToTime_BeginningOfFile(t *testing.T) {
 }
 
 func TestSeekToTime_EmptyFile(t *testing.T) {
-	f, err := os.CreateTemp("", "empty_seek_*.log")
-	if err != nil {
-		t.Fatalf("create temp: %v", err)
-	}
-	f.Close()
-	t.Cleanup(func() { os.Remove(f.Name()) })
+	f := makeLogFile(t, []string{})
+	p := parser.New()
 
-	r, err := New(f.Name())
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	defer r.Close()
-
-	_, err = SeekToTime(r, time.Now())
+	target := time.Now()
+	_, err := SeekToTime(f, 0, target, p)
 	if err == nil {
-		t.Error("expected EOF error for empty file, got nil")
+		t.Error("expected io.EOF for empty file, got nil")
+	}
+}
+
+func TestSeekToTime_MidFile(t *testing.T) {
+	lines := []string{
+		"2024-01-01T10:00:00Z INFO  startup complete",
+		"2024-01-01T10:01:00Z DEBUG checking config",
+		"2024-01-01T10:02:00Z WARN  disk usage high",
+		"2024-01-01T10:03:00Z ERROR disk full",
+	}
+
+	f := makeLogFile(t, lines)
+	stat, _ := f.Stat()
+	p := parser.New()
+
+	target := time.Date(2024, 1, 1, 10, 2, 0, 0, time.UTC)
+	offset, err := SeekToTime(f, stat.Size(), target, p)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Seek to the found offset and parse the line
+	if _, err := f.Seek(offset, 0); err != nil {
+		t.Fatalf("seek: %v", err)
+	}
+	line, err := p.Parse(f)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if !line.Timestamp.Equal(target) {
+		t.Errorf("expected timestamp %v, got %v", target, line.Timestamp)
 	}
 }
