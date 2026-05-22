@@ -1,68 +1,89 @@
 package config
 
 import (
+	"errors"
 	"flag"
-	"fmt"
 	"time"
-
-	"github.com/yourorg/logslice/internal/output"
 )
 
 const timeLayout = time.RFC3339
 
-// FromFlags parses a Config from the provided FlagSet after it has been parsed.
-// Call fs.Parse(args) before calling FromFlags.
-func FromFlags(fs *flag.FlagSet) (*Config, error) {
-	cfg := &Config{}
+// RegisterFlags adds logslice's CLI flags to fs.
+func RegisterFlags(fs *flag.FlagSet) {
+	fs.String("since", "", "include lines at or after this RFC3339 timestamp")
+	fs.String("until", "", "include lines before this RFC3339 timestamp")
+	fs.String("severity", "", "minimum severity level (DEBUG|INFO|WARN|ERROR)")
+	fs.String("format", "raw", "output format: raw or json")
+	fs.Int("tail", 0, "emit only the last N matching lines")
+	fs.Bool("follow", false, "keep file open and stream new lines")
+	fs.Bool("color", false, "enable ANSI colour highlighting")
+	fs.Int("max-width", 0, "truncate output lines to this rune width (0 = off)")
+	fs.Int("rate-limit", 0, "max output lines per second (0 = unlimited)")
+}
 
-	sinceStr := fs.Lookup("since")
-	untilStr := fs.Lookup("until")
-	formatStr := fs.Lookup("format")
+// FromFlags builds a Config from a parsed FlagSet and positional args.
+// args[0] must be the log file path.
+func FromFlags(fs *flag.FlagSet, args []string) (*Config, error) {
+	if len(args) == 0 {
+		return nil, errors.New("flags: file path argument is required")
+	}
 
-	if sinceStr != nil && sinceStr.Value.String() != "" {
-		t, err := time.Parse(timeLayout, sinceStr.Value.String())
-		if err != nil {
-			return nil, fmt.Errorf("config: invalid --since: %w", err)
+	cfg := &Config{
+		FilePath:  args[0],
+		Format:    fs.Lookup("format").Value.String(),
+		Severity:  fs.Lookup("severity").Value.String(),
+		Follow:    fs.Lookup("follow").Value.String() == "true",
+		Color:     fs.Lookup("color").Value.String() == "true",
+	}
+
+	if v := fs.Lookup("tail").Value.String(); v != "0" {
+		var n int
+		if _, err := parseIntFlag(v, &n); err != nil {
+			return nil, err
 		}
-		cfg.Since = t
+		cfg.TailN = n
 	}
 
-	if untilStr != nil && untilStr.Value.String() != "" {
-		t, err := time.Parse(timeLayout, untilStr.Value.String())
-		if err != nil {
-			return nil, fmt.Errorf("config: invalid --until: %w", err)
+	if v := fs.Lookup("max-width").Value.String(); v != "0" {
+		var n int
+		if _, err := parseIntFlag(v, &n); err != nil {
+			return nil, err
 		}
-		cfg.Until = t
+		cfg.MaxWidth = n
 	}
 
-	if formatStr != nil {
-		f, err := output.ParseFormat(formatStr.Value.String())
-		if err != nil {
-			return nil, fmt.Errorf("config: invalid --format: %w", err)
+	if v := fs.Lookup("rate-limit").Value.String(); v != "0" {
+		var n int
+		if _, err := parseIntFlag(v, &n); err != nil {
+			return nil, err
 		}
-		cfg.Format = f
+		cfg.RateLimit = n
 	}
 
-	if sev := fs.Lookup("severity"); sev != nil {
-		cfg.Severity = sev.Value.String()
+	if s := fs.Lookup("since").Value.String(); s != "" {
+		t, err := time.Parse(timeLayout, s)
+		if err != nil {
+			return nil, errors.New("flags: invalid --since: " + err.Error())
+		}
+		cfg.Since = &t
 	}
 
-	if stats := fs.Lookup("stats"); stats != nil {
-		cfg.ShowStats = stats.Value.String() == "true"
-	}
-
-	if args := fs.Args(); len(args) > 0 {
-		cfg.FilePath = args[0]
+	if s := fs.Lookup("until").Value.String(); s != "" {
+		t, err := time.Parse(timeLayout, s)
+		if err != nil {
+			return nil, errors.New("flags: invalid --until: " + err.Error())
+		}
+		cfg.Until = &t
 	}
 
 	return cfg, nil
 }
 
-// RegisterFlags registers all logslice flags onto the given FlagSet.
-func RegisterFlags(fs *flag.FlagSet) {
-	fs.String("since", "", "include lines at or after this RFC3339 timestamp")
-	fs.String("until", "", "include lines at or before this RFC3339 timestamp")
-	fs.String("severity", "", "minimum severity level (DEBUG, INFO, WARN, ERROR)")
-	fs.String("format", "raw", "output format: raw or json")
-	fs.Bool("stats", false, "print summary statistics to stderr")
+func parseIntFlag(s string, dst *int) (int, error) {
+	var n int
+	if _, err := fmt.Sscanf(s, "%d", &n); err != nil {
+		return 0, errors.New("flags: expected integer, got: " + s)
+	}
+	*dst = n
+	return n, nil
 }
