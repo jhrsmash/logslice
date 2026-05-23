@@ -66,6 +66,10 @@ func TestWarmer_WarmReturnsCachedEntry(t *testing.T) {
 	if idx1 != idx2 {
 		t.Error("expected the same index pointer on cache hit")
 	}
+	// Cache should still contain exactly one entry after two warms of the same file.
+	if c.Len() != 1 {
+		t.Errorf("expected 1 cache entry after duplicate warm, got %d", c.Len())
+	}
 }
 
 func TestWarmer_WarmFileNotFound(t *testing.T) {
@@ -76,5 +80,9 @@ func TestWarmer_WarmFileNotFound(t *testing.T) {
 	_, err := w.Warm(missing, time.Minute)
 	if err == nil {
 		t.Error("expected error for missing file, got nil")
+	}
+	// A failed warm must not pollute the cache.
+	if c.Len() != 0 {
+		t.Errorf("expected empty cache after failed warm, got %d entries", c.Len())
 	}
 }
