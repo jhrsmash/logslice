@@ -28,6 +28,20 @@ func makeLogFile(t *testing.T, lines []string) *os.File {
 	return f
 }
 
+// seekAndParse seeks the file to offset and parses the next log line.
+// It is a test helper to reduce repetition in seek result assertions.
+func seekAndParse(t *testing.T, f *os.File, offset int64, p *parser.Parser) *parser.Entry {
+	t.Helper()
+	if _, err := f.Seek(offset, 0); err != nil {
+		t.Fatalf("seek to offset %d: %v", offset, err)
+	}
+	line, err := p.Parse(f)
+	if err != nil {
+		t.Fatalf("parse at offset %d: %v", offset, err)
+	}
+	return line
+}
+
 func TestSeekToTime_BeginningOfFile(t *testing.T) {
 	lines := []string{
 		"2024-01-01T10:00:00Z INFO  startup complete",
@@ -79,14 +93,7 @@ func TestSeekToTime_MidFile(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Seek to the found offset and parse the line
-	if _, err := f.Seek(offset, 0); err != nil {
-		t.Fatalf("seek: %v", err)
-	}
-	line, err := p.Parse(f)
-	if err != nil {
-		t.Fatalf("parse: %v", err)
-	}
+	line := seekAndParse(t, f, offset, p)
 	if !line.Timestamp.Equal(target) {
 		t.Errorf("expected timestamp %v, got %v", target, line.Timestamp)
 	}
@@ -110,13 +117,7 @@ func TestSeekToTime_AfterLastEntry(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if _, err := f.Seek(offset, 0); err != nil {
-		t.Fatalf("seek: %v", err)
-	}
-	line, err := p.Parse(f)
-	if err != nil {
-		t.Fatalf("parse: %v", err)
-	}
+	line := seekAndParse(t, f, offset, p)
 	lastEntryTime := time.Date(2024, 1, 1, 10, 2, 0, 0, time.UTC)
 	if !line.Timestamp.Equal(lastEntryTime) {
 		t.Errorf("expected last entry timestamp %v, got %v", lastEntryTime, line.Timestamp)
