@@ -78,6 +78,17 @@ func TestCache_Invalidate(t *testing.T) {
 	}
 }
 
+// TestCache_InvalidateMissingKey ensures Invalidate does not panic when the
+// key does not exist in the cache.
+func TestCache_InvalidateMissingKey(t *testing.T) {
+	c := New(5 * time.Minute)
+	// Should not panic.
+	c.Invalidate("nonexistent")
+	if c.Len() != 0 {
+		t.Errorf("expected 0 entries, got %d", c.Len())
+	}
+}
+
 func TestCache_Len(t *testing.T) {
 	c := New(5 * time.Minute)
 	if c.Len() != 0 {
