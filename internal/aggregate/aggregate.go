@@ -80,6 +80,15 @@ func (a *Aggregator) Snapshot() []Bucket {
 	return result
 }
 
+// BucketCount returns the number of time buckets currently held by the
+// Aggregator. This is useful for monitoring memory growth without
+// copying all bucket data via Snapshot.
+func (a *Aggregator) BucketCount() int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return len(a.buckets)
+}
+
 // Reset clears all accumulated buckets.
 func (a *Aggregator) Reset() {
 	a.mu.Lock()
