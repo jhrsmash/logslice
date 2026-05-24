@@ -109,3 +109,29 @@ func TestCheckpoint_NewCreatesDir(t *testing.T) {
 		t.Errorf("directory not created: %v", err)
 	}
 }
+
+func TestCheckpoint_SaveUpdatesExisting(t *testing.T) {
+	s := tempStore(t)
+	e := baseEntry()
+
+	if err := s.Save(e); err != nil {
+		t.Fatalf("first Save: %v", err)
+	}
+
+	// Update the entry with a new offset and save again.
+	e.Offset = 2048
+	if err := s.Save(e); err != nil {
+		t.Fatalf("second Save: %v", err)
+	}
+
+	got, err := s.Load(e.FilePath)
+	if err != nil {
+		t.Fatalf("Load after update: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected entry after update, got nil")
+	}
+	if got.Offset != 2048 {
+		t.Errorf("Offset after update: want 2048, got %d", got.Offset)
+	}
+}
