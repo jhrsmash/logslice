@@ -78,3 +78,22 @@ func TestCounter_Reset(t *testing.T) {
 		t.Fatal("expected empty snapshot after Reset")
 	}
 }
+
+func TestCounter_ResetThenRecord(t *testing.T) {
+	c := levelcount.New()
+	c.Record(makeLine(parser.SeverityError))
+	c.Record(makeLine(parser.SeverityError))
+	c.Reset()
+	c.Record(makeLine(parser.SeverityInfo))
+
+	if got := c.Total(); got != 1 {
+		t.Fatalf("expected total 1 after reset and re-record, got %d", got)
+	}
+	snap := c.Snapshot()
+	if snap[parser.SeverityInfo] != 1 {
+		t.Fatalf("expected INFO=1 after reset and re-record, got %d", snap[parser.SeverityInfo])
+	}
+	if snap[parser.SeverityError] != 0 {
+		t.Fatalf("expected ERROR=0 after reset, got %d", snap[parser.SeverityError])
+	}
+}
