@@ -66,3 +66,16 @@ func TestHighlighter_SeverityColors_Distinct(t *testing.T) {
 		t.Fatal("expected distinct color codes for different severities")
 	}
 }
+
+// TestHighlighter_Enabled_EndsWithReset verifies that formatted output ends
+// with an ANSI reset sequence so that colors do not bleed into subsequent output.
+func TestHighlighter_Enabled_EndsWithReset(t *testing.T) {
+	const ansiReset = "\033[0m"
+	h := highlight.New(true)
+	for _, level := range []string{"ERROR", "WARN", "INFO", "DEBUG", "FATAL"} {
+		got := h.Format("some log line", parser.ParseSeverity(level))
+		if !strings.HasSuffix(got, ansiReset) {
+			t.Errorf("level %s: expected output to end with ANSI reset %q; got %q", level, ansiReset, got)
+		}
+	}
+}
